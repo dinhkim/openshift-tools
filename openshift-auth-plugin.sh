@@ -6,12 +6,12 @@
 set -euo pipefail
 
 # Configuration from environment variables
-OPENSHIFT_URL="${KUBERNETES_EXEC_INFO_OPENSHIFT_URL:-${OPENSHIFT_URL:-}}"
-OPENSHIFT_USERNAME="${KUBERNETES_EXEC_INFO_OPENSHIFT_USERNAME:-${OPENSHIFT_USERNAME:-}}"
-OPENSHIFT_PASSWORD="${KUBERNETES_EXEC_INFO_OPENSHIFT_PASSWORD:-${OPENSHIFT_PASSWORD:-}}"
-OPENSHIFT_TOKEN="${KUBERNETES_EXEC_INFO_OPENSHIFT_TOKEN:-${OPENSHIFT_TOKEN:-}}"
-CONTEXT="${KUBERNETES_EXEC_INFO_CONTEXT:-${CONTEXT:-}}"
-VERIFY_SSL="${KUBERNETES_EXEC_INFO_VERIFY_SSL:-${VERIFY_SSL:-false}}"
+OPENSHIFT_URL="${OPENSHIFT_URL:-}"
+OPENSHIFT_USERNAME="${OPENSHIFT_USERNAME:-}"
+OPENSHIFT_PASSWORD="${OPENSHIFT_PASSWORD:-}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-}"
+VERIFY_SSL="${VERIFY_SSL:-false}"
+SECRET_STORE="${SECRET_STORE:-keychain}"
 
 # Set curl options
 CURL_OPTS=""
@@ -141,9 +141,8 @@ authenticate_with_credentials() {
         expiry_timestamp=$(date -v"+24H" -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+1 day" +"%Y-%m-%dT%H:%M:%SZ")
     fi
     
-    # Store token in gopass
-    echo -n "$access_token" | gopass insert -f "$CONTEXT" token || return 1
-    echo -n "$expiry_timestamp" | gopass insert -f "$CONTEXT" token_expiry || return 1
+    # Store token in secret store
+    _store_secret "$KUBE_CONTEXT" "token" "{ \"token\": \"$access_token\", \"expirationTimestamp\": \"$expiry_timestamp\" }"
 
     output_token "$access_token" "$expiry_timestamp"
 }
@@ -181,7 +180,11 @@ validate_token() {
 
 # Function to check dependencies
 check_dependencies() {
-    local deps=("curl" "jq" "base64" "date" "gopass")
+    local deps=("curl" "jq" "base64" "date")
+    if [[ "${SECRET_STORE}" = "gopass" ]]; then
+        deps+=("gopass")
+    fi
+
     local missing_deps=()
     
     for dep in "${deps[@]}"; do
@@ -195,31 +198,62 @@ check_dependencies() {
     fi
 }
 
+# Function to get secret from gopass or keychain
+_get_secret() {
+    local context="$1"
+    local key="$2"
+    if [[ "${SECRET_STORE}" = "gopass" ]]; then
+        gopass show -o "$context" "$key" 2>/dev/null || true
+    else
+        security find-generic-password -a "$USER" -s "kubeconfig-$context-$key" -w 2>/dev/null || true
+    fi
+}
+
+# Function to store secret in gopass or keychain
+_store_secret() {
+    local context="$1"
+    local key="$2"
+    local value="$3"
+    if [[ "${SECRET_STORE}" = "gopass" ]]; then
+        echo -n "$value" | gopass insert -f "$context" "$key"
+    else
+        # The -U flag allows updating an existing item.
+        security add-generic-password -a "$USER" -s "kubeconfig-$context-$key" -w "$value" -U
+    fi
+}
+
 # Main execution
 main() {
     # Check dependencies
     check_dependencies
     
-    # Validate required configuration
+    # Validate required OpenShift url
     if [[ -z "$OPENSHIFT_URL" ]]; then
-        error_exit "OPENSHIFT_URL environment variable is required"
+        # get server url from KUBERNETES_EXEC_INFO
+        if ! echo "$KUBERNETES_EXEC_INFO" | jq . >/dev/null 2>&1; then
+            error_exit "Invalid JSON in KUBERNETES_EXEC_INFO"
+        fi
+
+        OPENSHIFT_URL=$(echo "$KUBERNETES_EXEC_INFO" | jq -r '.spec.cluster.server')
+
+        if [[ -z "$OPENSHIFT_URL" ]]; then
+            error_exit "No valid OpenShift url found. Set OPENSHIFT_URL environment variable is required or enable 'provideClusterInfo' in kubeconfig"
+        fi
     fi
 
     # Validate required context
-    if [[ -z "$CONTEXT" ]]; then
-        error_exit "CONTEXT environment variable is required"
+    if [[ -z "$KUBE_CONTEXT" ]]; then
+        error_exit "KUBE_CONTEXT environment variable is required"
     fi
 
     # Method 1: Use existing token
-    # Get token stored in gopass
-    if [[ -z "$OPENSHIFT_TOKEN" ]]; then
-        OPENSHIFT_TOKEN=$(gopass show -o "$CONTEXT" token 2>/dev/null || return 0)
-    fi
-
-    if [[ -n "$OPENSHIFT_TOKEN" ]]; then
-        if $(validate_token "$OPENSHIFT_URL" "$OPENSHIFT_TOKEN"); then
-            local expiry_timestamp=$(gopass show -o "$CONTEXT" token_expiry 2>/dev/null || return 0)
-            output_token "$OPENSHIFT_TOKEN" "$expiry_timestamp"
+    # Get token stored in secret store
+    local token_str=$(_get_secret "$KUBE_CONTEXT" "token")
+    if [[ -n "$token_str" ]]; then
+        local token=$(echo "$token_str" | jq -r '.token')
+        local expiry_timestamp=$(echo "$token_str" | jq -r '.expirationTimestamp')
+        if $(validate_token "$OPENSHIFT_URL" "$token"); then
+            output_token "$token" "$expiry_timestamp"
             return
         fi
     fi
@@ -227,11 +261,11 @@ main() {
     # Method 2: Use username/password
     # Get username and password stored in gopass
     if [[ -z "$OPENSHIFT_USERNAME" ]]; then
-        OPENSHIFT_USERNAME=$(gopass show -o "$CONTEXT" username 2>/dev/null || return 0)
+        OPENSHIFT_USERNAME=$(_get_secret "$KUBE_CONTEXT" "username")
     fi
 
     if [[ -z "$OPENSHIFT_PASSWORD" ]]; then
-        OPENSHIFT_PASSWORD=$(gopass show -o "$CONTEXT" password 2>/dev/null || return 0)
+        OPENSHIFT_PASSWORD=$(_get_secret "$KUBE_CONTEXT" "password")
     fi
 
     if [[ -n "$OPENSHIFT_USERNAME" && -n "$OPENSHIFT_PASSWORD" ]]; then
@@ -240,7 +274,7 @@ main() {
     fi
     
     # No valid authentication method
-    error_exit "No valid authentication method found. Set OPENSHIFT_TOKEN or OPENSHIFT_USERNAME/OPENSHIFT_PASSWORD"
+    error_exit "No valid authentication method found. Set OPENSHIFT_USERNAME & OPENSHIFT_PASSWORD"
 }
 
 # Execute main function
