@@ -9,9 +9,9 @@ set -euo pipefail
 OPENSHIFT_URL="${OPENSHIFT_URL:-}"
 OPENSHIFT_USERNAME="${OPENSHIFT_USERNAME:-}"
 OPENSHIFT_PASSWORD="${OPENSHIFT_PASSWORD:-}"
-KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 VERIFY_SSL="${VERIFY_SSL:-false}"
 SECRET_STORE="${SECRET_STORE:-keychain}"
+CLUSTER_NAME="${CLUSTER_NAME:-}"
 
 # Set curl options
 CURL_OPTS=""
@@ -142,7 +142,7 @@ authenticate_with_credentials() {
     fi
     
     # Store token in secret store
-    _store_secret "$KUBE_CONTEXT" "token" "{ \"token\": \"$access_token\", \"expirationTimestamp\": \"$expiry_timestamp\" }"
+    _store_secret "$CLUSTER_NAME" "token" "{ \"token\": \"$access_token\", \"expirationTimestamp\": \"$expiry_timestamp\" }"
 
     output_token "$access_token" "$expiry_timestamp"
 }
@@ -200,25 +200,25 @@ check_dependencies() {
 
 # Function to get secret from gopass or keychain
 _get_secret() {
-    local context="$1"
+    local cluster="$1"
     local key="$2"
     if [[ "${SECRET_STORE}" = "gopass" ]]; then
-        gopass show -o "$context" "$key" 2>/dev/null || true
+        gopass show -o "$cluster" "$key" 2>/dev/null || true
     else
-        security find-generic-password -a "$USER" -s "kubeconfig-$context-$key" -w 2>/dev/null || true
+        security find-generic-password -a "$USER" -s "kubeconfig-$cluster-$key" -w 2>/dev/null || true
     fi
 }
 
 # Function to store secret in gopass or keychain
 _store_secret() {
-    local context="$1"
+    local cluster="$1"
     local key="$2"
     local value="$3"
     if [[ "${SECRET_STORE}" = "gopass" ]]; then
-        echo -n "$value" | gopass insert -f "$context" "$key"
+        echo -n "$value" | gopass insert -f "$cluster" "$key"
     else
         # The -U flag allows updating an existing item.
-        security add-generic-password -a "$USER" -s "kubeconfig-$context-$key" -w "$value" -U
+        security add-generic-password -a "$USER" -s "kubeconfig-$cluster-$key" -w "$value" -U
     fi
 }
 
@@ -241,14 +241,14 @@ main() {
         fi
     fi
 
-    # Validate required context
-    if [[ -z "$KUBE_CONTEXT" ]]; then
-        error_exit "KUBE_CONTEXT environment variable is required"
+    # Validate required cluster name
+    if [[ -z "$CLUSTER_NAME" ]]; then
+        error_exit "CLUSTER_NAME environment variable is required"
     fi
 
     # Method 1: Use existing token
     # Get token stored in secret store
-    local token_str=$(_get_secret "$KUBE_CONTEXT" "token")
+    local token_str=$(_get_secret "$CLUSTER_NAME" "token")
     if [[ -n "$token_str" ]]; then
         local token=$(echo "$token_str" | jq -r '.token')
         local expiry_timestamp=$(echo "$token_str" | jq -r '.expirationTimestamp')
@@ -261,11 +261,11 @@ main() {
     # Method 2: Use username/password
     # Get username and password stored in gopass
     if [[ -z "$OPENSHIFT_USERNAME" ]]; then
-        OPENSHIFT_USERNAME=$(_get_secret "$KUBE_CONTEXT" "username")
+        OPENSHIFT_USERNAME=$(_get_secret "$CLUSTER_NAME" "username")
     fi
 
     if [[ -z "$OPENSHIFT_PASSWORD" ]]; then
-        OPENSHIFT_PASSWORD=$(_get_secret "$KUBE_CONTEXT" "password")
+        OPENSHIFT_PASSWORD=$(_get_secret "$CLUSTER_NAME" "password")
     fi
 
     if [[ -n "$OPENSHIFT_USERNAME" && -n "$OPENSHIFT_PASSWORD" ]]; then
