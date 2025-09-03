@@ -64,21 +64,17 @@ You can store your OpenShift username and password in your chosen secret store.
 #### macOS Keychain
 
 ```bash
-# Store your username
-security add-generic-password -a $USER -s "kubeconfig-my-openshift-cluster-username" -w "my-username"
+# Store your credentails
+security add-generic-password -a "openshift-auth-plugin" -s "my-openshift-cluster-credentials" -l "my-openshift-cluster credentials" -T "" -w "{ \"username\": \"my-username\", \"password\": \"my-password\" }"
 
-# Store your password
-security add-generic-password -a $USER -s "kubeconfig-my-openshift-cluster-password" -w "my-password"
 ```
 
 #### gopass
 
 ```bash
-# Store your username
-gopass insert -f my-openshift-cluster/username
+# Store your credentails
+gopass insert -f my-openshift-cluster credentials
 
-# Store your password
-gopass insert -f my-openshift-cluster/password
 ```
 
 Replace `my-openshift-cluster` with your `CLUSTER_NAME` name.

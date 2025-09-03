@@ -7,8 +7,6 @@ set -euo pipefail
 
 # Configuration from environment variables
 OPENSHIFT_URL="${OPENSHIFT_URL:-}"
-OPENSHIFT_USERNAME="${OPENSHIFT_USERNAME:-}"
-OPENSHIFT_PASSWORD="${OPENSHIFT_PASSWORD:-}"
 VERIFY_SSL="${VERIFY_SSL:-false}"
 SECRET_STORE="${SECRET_STORE:-keychain}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
@@ -205,7 +203,7 @@ _get_secret() {
     if [[ "${SECRET_STORE}" = "gopass" ]]; then
         gopass show -o "$cluster" "$key" 2>/dev/null || true
     else
-        security find-generic-password -a "$USER" -s "kubeconfig-$cluster-$key" -w 2>/dev/null || true
+        security find-generic-password -a "openshift-auth-plugin" -s "$cluster-$key" -w 2>/dev/null || true
     fi
 }
 
@@ -218,7 +216,7 @@ _store_secret() {
         echo -n "$value" | gopass insert -f "$cluster" "$key"
     else
         # The -U flag allows updating an existing item.
-        security add-generic-password -a "$USER" -s "kubeconfig-$cluster-$key" -w "$value" -U
+        security add-generic-password -a "openshift-auth-plugin" -s "$cluster-$key" -l "$cluster $key" -w "$value" -U
     fi
 }
 
@@ -260,21 +258,18 @@ main() {
 
     # Method 2: Use username/password
     # Get username and password stored in gopass
-    if [[ -z "$OPENSHIFT_USERNAME" ]]; then
-        OPENSHIFT_USERNAME=$(_get_secret "$CLUSTER_NAME" "username")
-    fi
-
-    if [[ -z "$OPENSHIFT_PASSWORD" ]]; then
-        OPENSHIFT_PASSWORD=$(_get_secret "$CLUSTER_NAME" "password")
-    fi
-
-    if [[ -n "$OPENSHIFT_USERNAME" && -n "$OPENSHIFT_PASSWORD" ]]; then
-        authenticate_with_credentials "$OPENSHIFT_URL" "$OPENSHIFT_USERNAME" "$OPENSHIFT_PASSWORD"
-        return
+    local credentials=$(_get_secret "$CLUSTER_NAME" "credentials")
+    if [[ -n "$credentials" ]]; then
+        local username=$(echo "$credentials" | jq -r '.username')
+        local password=$(echo "$credentials" | jq -r '.password')   
+        if [[ -n "$username" && -n "$password" ]]; then
+            authenticate_with_credentials "$OPENSHIFT_URL" "$username" "$password"
+            return
+        fi
     fi
     
     # No valid authentication method
-    error_exit "No valid authentication method found. Set OPENSHIFT_USERNAME & OPENSHIFT_PASSWORD"
+    error_exit "No valid authentication method found. Please check README.md for more information."
 }
 
 # Execute main function
