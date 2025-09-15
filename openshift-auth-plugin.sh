@@ -10,6 +10,7 @@ OPENSHIFT_URL="${OPENSHIFT_URL:-}"
 VERIFY_SSL="${VERIFY_SSL:-false}"
 SECRET_STORE="${SECRET_STORE:-keychain}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
+DEBUG="${DEBUG:-false}"
 
 # Set curl options
 CURL_OPTS=""
@@ -50,6 +51,13 @@ output_token() {
   }
 }
 EOF
+}
+
+log() {
+    if [[ "${DEBUG:-false}" == "true" ]]; then
+        local message="$1"
+        echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') $message" >&2
+    fi
 }
 
 # Function to get OAuth info
@@ -149,18 +157,40 @@ authenticate_with_credentials() {
 validate_token() {
     local server_url="$1"
     local token="$2"
-    
+    local expiry_timestamp="$3"
+
+    log "Validating token..."
+
+    # Check if token is expired
+    if [[ -n "$expiry_timestamp" ]]; then
+        local current_timestamp_seconds
+        current_timestamp_seconds=$(date -u +%s)
+        local expiry_timestamp_seconds
+        expiry_timestamp_seconds=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$expiry_timestamp" +%s 2>/dev/null || date -d "$expiry_timestamp" +%s 2>/dev/null || echo 0)
+
+        log "Current timestamp: $current_timestamp_seconds"
+        log "Expiry timestamp: $expiry_timestamp_seconds"
+
+        if [[ "$expiry_timestamp_seconds" -ne 0 && "$current_timestamp_seconds" -ge "$expiry_timestamp_seconds" ]]; then
+            log "Token is expired."
+        else 
+            return 0
+        fi
+    fi
+
     # Test the token
     local user_url="${server_url}/apis/user.openshift.io/v1/users/~"
     local response
     local http_code
     
+    log "GET $user_url"
+
     response=$(curl -s $CURL_OPTS \
-        -w "%{http_code}" \
+        -w "%{{http_code}}" \
         -H "Authorization: Bearer ${token}" \
         -H "Accept: application/json" \
-        "$user_url" 2>/dev/null)
-    
+        "$user_url" 2>/dev/null)   
+
     if [[ $? -ne 0 ]]; then
         error_exit "Failed to validate token"
     fi
@@ -168,10 +198,12 @@ validate_token() {
     # Extract HTTP status code
     http_code="${response: -3}"
     
+    log "Response $http_code"
+
     if [[ "$http_code" == "200" ]]; then
         return 0
     else
-        # error_exit "Token validation failed (HTTP $http_code)"
+        log "Token validation failed (HTTP $http_code)"
         return 1
     fi
 }
@@ -250,7 +282,7 @@ main() {
     if [[ -n "$token_str" ]]; then
         local token=$(echo "$token_str" | jq -r '.token')
         local expiry_timestamp=$(echo "$token_str" | jq -r '.expirationTimestamp')
-        if $(validate_token "$OPENSHIFT_URL" "$token"); then
+        if validate_token "$OPENSHIFT_URL" "$token" "$expiry_timestamp"; then
             output_token "$token" "$expiry_timestamp"
             return
         fi
