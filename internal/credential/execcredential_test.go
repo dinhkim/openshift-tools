@@ -118,17 +118,6 @@ func TestOutputError(t *testing.T) {
 			r, w, _ := os.Pipe()
 			os.Stderr = w
 
-			// OutputError calls os.Exit(1), so we need to catch it
-			// We'll use a separate goroutine and recover from panic if needed
-			// For testing, we'll test the JSON encoding separately
-			oldExit := osExit
-			defer func() { osExit = oldExit }()
-
-			exitCode := 0
-			osExit = func(code int) {
-				exitCode = code
-			}
-
 			OutputError(tt.message)
 
 			// Restore stderr and read output
@@ -137,11 +126,6 @@ func TestOutputError(t *testing.T) {
 			var buf bytes.Buffer
 			io.Copy(&buf, r)
 			output := buf.String()
-
-			// Validate exit code
-			if exitCode != 1 {
-				t.Errorf("exit code = %d, want 1", exitCode)
-			}
 
 			// Validate JSON structure
 			var cred ExecCredential

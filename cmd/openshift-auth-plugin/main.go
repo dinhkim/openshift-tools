@@ -3,7 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-
+	"os"
+	
 	"github.com/dinhkim/openshift-tools/internal/auth"
 	"github.com/dinhkim/openshift-tools/internal/config"
 	"github.com/dinhkim/openshift-tools/internal/credential"
@@ -16,7 +17,7 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		credential.OutputError(fmt.Sprintf("Configuration error: %v", err))
-		return
+		os.Exit(1)
 	}
 
 	// Initialize logger
@@ -26,7 +27,7 @@ func main() {
 	store, err := storage.New(cfg.SecretStore)
 	if err != nil {
 		credential.OutputError(fmt.Sprintf("Storage initialization error: %v", err))
-		return
+		os.Exit(1)
 	}
 
 	// Initialize authenticator
@@ -35,7 +36,7 @@ func main() {
 	// Try to run the authentication flow
 	if err := run(cfg, store, authenticator, logger); err != nil {
 		credential.OutputError(err.Error())
-		return
+		os.Exit(1)
 	}
 }
 

@@ -45,10 +45,8 @@ func OutputToken(token, expirationTimestamp string) error {
 	return encoder.Encode(cred)
 }
 
-// osExit is a variable to allow mocking os.Exit in tests
-var osExit = os.Exit
 
-// OutputError writes an ExecCredential with error to stderr and exits with code 1
+// OutputError writes an ExecCredential with error to stderr
 func OutputError(message string) {
 	cred := &ExecCredential{
 		APIVersion: "client.authentication.k8s.io/v1beta1",
@@ -64,5 +62,4 @@ func OutputError(message string) {
 		// Fallback if JSON encoding fails
 		fmt.Fprintf(os.Stderr, "Failed to encode error credential: %v\n", err)
 	}
-	osExit(1)
 }
