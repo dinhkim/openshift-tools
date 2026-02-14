@@ -11,6 +11,8 @@ VERIFY_SSL="${VERIFY_SSL:-false}"
 SECRET_STORE="${SECRET_STORE:-keychain}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 DEBUG="${DEBUG:-false}"
+SSO_ENABLED="${SSO_ENABLED:-false}"
+SSO_CLIENT_ID="${SSO_CLIENT_ID:-openshift-browser-client}"
 
 # Set curl options
 CURL_OPTS=""
@@ -58,6 +60,42 @@ log() {
         local message="$1"
         echo "$(date -u +'%Y-%m-%dT%H:%M:%SZ') $message" >&2
     fi
+}
+
+# Function to open browser (cross-platform)
+_open_browser() {
+    local url="$1"
+    
+    # Always print URL as fallback
+    echo "Opening browser to: $url" >&2
+    
+    # Try to open browser based on platform
+    if command -v open >/dev/null 2>&1; then
+        # macOS
+        open "$url" >/dev/null 2>&1 || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        # Linux
+        xdg-open "$url" >/dev/null 2>&1 || true
+    elif command -v wslview >/dev/null 2>&1; then
+        # WSL
+        wslview "$url" >/dev/null 2>&1 || true
+    else
+        echo "Could not detect browser opener. Please open the URL manually." >&2
+    fi
+}
+
+# Function to read user input from terminal
+_read_user_input() {
+    local prompt="$1"
+    local input=""
+    
+    echo -n "$prompt" >&2
+    read -r input
+    
+    # Trim whitespace
+    input=$(echo "$input" | xargs)
+    
+    echo "$input"
 }
 
 # Function to get OAuth info
@@ -151,6 +189,80 @@ authenticate_with_credentials() {
     _store_secret "$CLUSTER_NAME" "token" "{ \"token\": \"$access_token\", \"expirationTimestamp\": \"$expiry_timestamp\" }"
 
     output_token "$access_token" "$expiry_timestamp"
+}
+
+# Function to authenticate with SSO (browser-based OAuth flow)
+authenticate_with_sso() {
+    local server_url="$1"
+    
+    log "Attempting SSO authentication..."
+    
+    # Get OAuth information
+    local oauth_info
+    if ! oauth_info=$(get_oauth_info "$server_url"); then
+        log "Failed to get OAuth info for SSO"
+        return 1
+    fi
+    
+    # Extract authorization endpoint
+    local authorization_endpoint
+    if ! authorization_endpoint=$(echo "$oauth_info" | jq -r '.authorization_endpoint'); then
+        log "Could not parse authorization endpoint for SSO"
+        return 1
+    fi
+    
+    if [[ "$authorization_endpoint" == "null" ]]; then
+        log "Authorization endpoint not found for SSO"
+        return 1
+    fi
+    
+    # Extract token endpoint (needed for code exchange)
+    local token_endpoint
+    token_endpoint=$(echo "$oauth_info" | jq -r '.token_endpoint // empty')
+    
+    # Build authorization URL
+    local issuer
+    issuer=$(echo "$oauth_info" | jq -r '.issuer // empty')
+    local client_id="${SSO_CLIENT_ID}"
+    local redirect_uri="${issuer}/oauth/token/display"
+    local response_type="code"
+    
+    # URL encode the redirect_uri parameter
+    local encoded_redirect_uri
+    encoded_redirect_uri=$(printf '%s' "$redirect_uri" | jq -sRr '@uri')
+    
+    local auth_url="${authorization_endpoint}?client_id=${client_id}&response_type=${response_type}&redirect_uri=${encoded_redirect_uri}"
+    
+    # Open browser and prompt user
+    echo "" >&2
+    echo "==============================================================" >&2
+    echo "SSO Authentication Required" >&2
+    echo "==============================================================" >&2
+    echo "" >&2
+    
+    _open_browser "$auth_url"
+    
+    echo "" >&2
+    echo "Please complete authentication in your browser." >&2
+    
+    echo "After authentication, you will receive an api token." >&2
+    echo "" >&2
+    local token
+    token=$(_read_user_input "Enter api token: ")
+    
+    if [[ -z "$token" ]]; then
+        log "No api token provided"
+        return 1
+    fi
+    
+    # Default expiry to 24 hours
+    local expiry_timestamp=$(date -v"+24H" -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+1 day" +"%Y-%m-%dT%H:%M:%SZ")
+    
+    # Store token
+    _store_secret "$CLUSTER_NAME" "token" "{ \"token\": \"$token\", \"expirationTimestamp\": \"$expiry_timestamp\" }"
+    
+    log "SSO authentication successful"
+    output_token "$token" "$expiry_timestamp"
 }
 
 # Function to validate token
@@ -288,17 +400,24 @@ main() {
         fi
     fi
 
-    # Method 2: Use username/password
-    # Get username and password stored in gopass
-    local credentials=$(_get_secret "$CLUSTER_NAME" "credentials")
-    if [[ -n "$credentials" ]]; then
-        local username=$(echo "$credentials" | jq -r '.username')
-        local password=$(echo "$credentials" | jq -r '.password')   
-        if [[ -n "$username" && -n "$password" ]]; then
-            authenticate_with_credentials "$OPENSHIFT_URL" "$username" "$password"
+    # Method 2: SSO authentication (browser-based OAuth flow)
+    if [[ "$SSO_ENABLED" != "false" ]]; then
+        if authenticate_with_sso "$OPENSHIFT_URL"; then
             return
         fi
     fi
+
+    # Method 3: Use username/password
+    # Get username and password stored in gopass
+    # local credentials=$(_get_secret "$CLUSTER_NAME" "credentials")
+    # if [[ -n "$credentials" ]]; then
+    #     local username=$(echo "$credentials" | jq -r '.username')
+    #     local password=$(echo "$credentials" | jq -r '.password')   
+    #     if [[ -n "$username" && -n "$password" ]]; then
+    #         authenticate_with_credentials "$OPENSHIFT_URL" "$username" "$password"
+    #         return
+    #     fi
+    # fi
     
     # No valid authentication method
     error_exit "No valid authentication method found. Please check README.md for more information."
