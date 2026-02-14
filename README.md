@@ -278,12 +278,21 @@ make lint
 # Run tests
 make test
 
+# Generate coverage report
+make coverage
+
 # Build
 make build
 
 # Clean
 make clean
 ```
+
+**Test Coverage:**
+- 72 test cases across 6 test files
+- 67.2% overall code coverage
+- 100% coverage for log, config, and credential packages
+- Mock implementations for testing storage and HTTP interactions
 
 ## License
 

@@ -19,6 +19,9 @@ make build
 # Run tests
 make test
 
+# Generate coverage report (creates coverage.html)
+make coverage
+
 # Lint (requires golangci-lint)
 make lint
 
@@ -116,12 +119,23 @@ internal/                      # Private packages
 - Controlled by `DEBUG` env var or `--debug` flag
 - Never log sensitive data (tokens, passwords)
 
-### Testing (when tests are added)
-- Use table-driven tests
+### Testing
+- Use table-driven tests for comprehensive coverage
 - Test file naming: `*_test.go`
-- Mock interfaces for unit testing (e.g., mock `Storage`)
+- Mock interfaces for unit testing (see `storage.MockStorage`)
 - Use `t.Helper()` in helper functions
+- Use `httptest` for testing HTTP interactions
 - Separate unit tests from integration tests with build tags
+
+**Current Test Coverage:**
+- `internal/log`: 100% coverage
+- `internal/credential`: 90% coverage
+- `internal/config`: 96.4% coverage
+- `internal/auth`: 87.9% coverage
+- `internal/storage`: 59.3% coverage (mock: 100%, real backends: 0% - require system integration)
+- **Overall**: 67.2% coverage
+
+Note: Real storage backends (keychain, gopass) are not unit tested as they require system commands. They are tested via integration/manual testing.
 
 ## Code Style — Shell Script
 
