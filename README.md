@@ -323,6 +323,22 @@ make clean
 - 100% coverage for log, config, and credential packages
 - Mock implementations for testing storage and HTTP interactions
 
+### OpenShift Oauth urls
+
+- From Console page
+https://oauth-openshift.apps.example.com/oauth/authorize?client_id=console&redirect_uri=https%3A%2F%2Fconsole-openshift-console.apps.example.com%2Fauth%2Fcallback&response_type=code&scope=user%3Afull&state=c33a03b73538142c5ec7f1f31112b1c7
+
+- Select AzureAD IDP
+https://oauth-openshift.apps.example.com/oauth/authorize?client_id=console&idp=AzureAD&redirect_uri=https%3A%2F%2Fconsole-openshift-console.apps.example.com%2Fauth%2Fcallback&response_type=code&scope=user%3Afull&state=c33a03b73538142c5ec7f1f31112b1c7
+
+
+- From display token page
+https://oauth-openshift.apps.example.com/oauth/authorize?client_id=openshift-browser-client&redirect_uri=https%3A%2F%2Foauth-openshift.apps.example.com%2Foauth%2Ftoken%2Fdisplay&response_type=code
+
+
+- From oc login
+https://oauth-openshift.apps.example.com/oauth/authorize?client_id=openshift-cli-client&code_challenge=D0fMJ61pkLRP3uNVmauOOia-OsP25ndloYWE8INKEr0&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A56079%2Fcallback&response_type=code
+
 ## License
 
 This project is open source. See repository for license details.
