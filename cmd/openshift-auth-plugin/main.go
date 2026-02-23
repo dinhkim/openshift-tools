@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
@@ -12,7 +13,18 @@ import (
 	"github.com/dinhkim/openshift-tools/internal/storage"
 )
 
+var version = "dev"
+
 func main() {
+	// Handle --version flag before normal flag parsing
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Fprintf(os.Stderr, "openshift-auth-plugin %s\n", version)
+		os.Exit(0)
+	}
+
+	// Ensure flag.CommandLine.Parse is called if there are any flags (config.Load will call flag.Parse)
+	_ = flag.NewFlagSet("", flag.ContinueOnError)
+
 	// Load configuration from environment variables and flags
 	cfg, err := config.Load()
 	if err != nil {

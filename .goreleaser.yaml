@@ -1,0 +1,31 @@
+version: 2
+
+project_name: openshift-auth-plugin
+
+before:
+  hooks:
+    - go fmt ./...
+    - go vet ./...
+
+builds:
+  - id: openshift-auth-plugin
+    main: ./cmd/openshift-auth-plugin
+    binary: openshift-auth-plugin
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: dinhkim
+    name: openshift-tools
+  auto_generate_notes: true
