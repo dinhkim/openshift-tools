@@ -35,14 +35,23 @@ func TestNewAuthenticator(t *testing.T) {
 
 func TestGetOAuthInfo(t *testing.T) {
 	tests := []struct {
-		name           string
-		responseStatus int
-		responseBody   string
-		wantErr        bool
-		wantEndpoint   string
+		name              string
+		responseStatus    int
+		responseBody      string
+		wantErr           bool
+		wantEndpoint      string
+		wantTokenEndpoint string
 	}{
 		{
-			name:           "valid oauth info",
+			name:              "valid oauth info with all fields",
+			responseStatus:    http.StatusOK,
+			responseBody:      `{"authorization_endpoint":"https://oauth.test.com/authorize","token_endpoint":"https://oauth.test.com/token","code_challenge_methods_supported":["S256"]}`,
+			wantErr:           false,
+			wantEndpoint:      "https://oauth.test.com/authorize",
+			wantTokenEndpoint: "https://oauth.test.com/token",
+		},
+		{
+			name:           "valid oauth info without token endpoint",
 			responseStatus: http.StatusOK,
 			responseBody:   `{"authorization_endpoint":"https://oauth.test.com/authorize"}`,
 			wantErr:        false,
@@ -98,8 +107,50 @@ func TestGetOAuthInfo(t *testing.T) {
 				if info.AuthorizationEndpoint != tt.wantEndpoint {
 					t.Errorf("AuthorizationEndpoint = %q, want %q", info.AuthorizationEndpoint, tt.wantEndpoint)
 				}
+				if tt.wantTokenEndpoint != "" && info.TokenEndpoint != tt.wantTokenEndpoint {
+					t.Errorf("TokenEndpoint = %q, want %q", info.TokenEndpoint, tt.wantTokenEndpoint)
+				}
 			}
 		})
+	}
+}
+
+func TestAuthenticateWithSSO_NoTokenEndpoint(t *testing.T) {
+	// When the OAuth server does not provide a token_endpoint, SSO should fail
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"authorization_endpoint":"https://oauth.test.com/authorize"}`))
+	}))
+	defer server.Close()
+
+	mockStorage := storage.NewMockStorage()
+	logger := log.New(false)
+	auth := NewAuthenticator(server.URL, false, mockStorage, logger)
+
+	_, err := auth.AuthenticateWithSSO("test-cluster", 5)
+	if err == nil {
+		t.Error("AuthenticateWithSSO() expected error when token_endpoint is missing")
+	}
+	if err != nil && !containsString(err.Error(), "token endpoint not found") {
+		t.Errorf("error should mention token endpoint, got: %v", err)
+	}
+}
+
+func TestAuthenticateWithSSO_InvalidOAuth(t *testing.T) {
+	// When the OAuth server returns invalid JSON
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not json`))
+	}))
+	defer server.Close()
+
+	mockStorage := storage.NewMockStorage()
+	logger := log.New(false)
+	auth := NewAuthenticator(server.URL, false, mockStorage, logger)
+
+	_, err := auth.AuthenticateWithSSO("test-cluster", 5)
+	if err == nil {
+		t.Error("AuthenticateWithSSO() expected error for invalid OAuth response")
 	}
 }
 
