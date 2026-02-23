@@ -20,15 +20,16 @@ type callbackResult struct {
 
 // callbackServer manages the local HTTP server that receives the OAuth callback
 type callbackServer struct {
-	listener net.Listener
-	server   *http.Server
-	resultCh chan callbackResult
-	port     int
+	listener      net.Listener
+	server        *http.Server
+	resultCh      chan callbackResult
+	port          int
+	expectedState string
 }
 
 // startCallbackServer starts a local HTTP server on a random port to receive
 // the OAuth authorization code callback
-func startCallbackServer() (*callbackServer, error) {
+func startCallbackServer(expectedState string) (*callbackServer, error) {
 	// Listen on loopback address with random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -40,14 +41,19 @@ func startCallbackServer() (*callbackServer, error) {
 
 	mux := http.NewServeMux()
 	srv := &http.Server{
-		Handler: mux,
+		Handler:        mux,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		IdleTimeout:    30 * time.Second,
+		MaxHeaderBytes: 4096,
 	}
 
 	cs := &callbackServer{
-		listener: listener,
-		server:   srv,
-		resultCh: resultCh,
-		port:     port,
+		listener:      listener,
+		server:        srv,
+		resultCh:      resultCh,
+		port:          port,
+		expectedState: expectedState,
 	}
 
 	mux.HandleFunc(callbackPath, cs.handleCallback)
@@ -64,6 +70,25 @@ func startCallbackServer() (*callbackServer, error) {
 
 // handleCallback handles the OAuth callback request
 func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// Validate state parameter if expected
+	if cs.expectedState != "" {
+		state := r.URL.Query().Get("state")
+		if state == "" {
+			cs.resultCh <- callbackResult{
+				Err: fmt.Errorf("state parameter missing in callback"),
+			}
+			http.Error(w, "State parameter missing", http.StatusBadRequest)
+			return
+		}
+		if state != cs.expectedState {
+			cs.resultCh <- callbackResult{
+				Err: fmt.Errorf("state parameter mismatch - possible CSRF attack"),
+			}
+			http.Error(w, "State parameter mismatch", http.StatusBadRequest)
+			return
+		}
+	}
+
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		errMsg := r.URL.Query().Get("error")

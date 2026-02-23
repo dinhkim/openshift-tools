@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,18 @@ import (
 	"github.com/dinhkim/openshift-tools/internal/log"
 	"github.com/dinhkim/openshift-tools/internal/storage"
 )
+
+// validateHTTPS ensures the given URL uses HTTPS scheme
+func validateHTTPS(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("endpoint must use HTTPS, got %s", u.Scheme)
+	}
+	return nil
+}
 
 // OAuthInfo represents the OAuth authorization server metadata
 type OAuthInfo struct {
@@ -92,6 +105,18 @@ func (a *Authenticator) GetOAuthInfo() (*OAuthInfo, error) {
 
 	if info.AuthorizationEndpoint == "" {
 		return nil, fmt.Errorf("authorization endpoint not found in OAuth info")
+	}
+
+	// Validate HTTPS for authorization endpoint
+	if err := validateHTTPS(info.AuthorizationEndpoint); err != nil {
+		return nil, fmt.Errorf("authorization endpoint validation failed: %w", err)
+	}
+
+	// Validate HTTPS for token endpoint if present
+	if info.TokenEndpoint != "" {
+		if err := validateHTTPS(info.TokenEndpoint); err != nil {
+			return nil, fmt.Errorf("token endpoint validation failed: %w", err)
+		}
 	}
 
 	return &info, nil
@@ -211,8 +236,15 @@ func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds i
 	}
 	a.logger.Debug("Generated PKCE code challenge")
 
-	// Start local callback server
-	callbackSrv, err := startCallbackServer()
+	// Generate state parameter for CSRF protection
+	state, err := generateRandomState()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate state parameter: %w", err)
+	}
+	a.logger.Debug("Generated state parameter")
+
+	// Start local callback server with state validation
+	callbackSrv, err := startCallbackServer(state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -232,6 +264,7 @@ func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds i
 	query.Set("redirect_uri", callbackSrv.redirectURI())
 	query.Set("code_challenge", pkce.CodeChallenge)
 	query.Set("code_challenge_method", "S256")
+	query.Set("state", state)
 	authURL.RawQuery = query.Encode()
 
 	authURLStr := authURL.String()
@@ -298,4 +331,13 @@ func extractTokenFromFragment(locationHeader string) (accessToken string, expire
 	}
 
 	return accessToken, expiresIn, nil
+}
+
+// generateRandomState generates a random state parameter for CSRF protection
+func generateRandomState() (string, error) {
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random state: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(stateBytes), nil
 }

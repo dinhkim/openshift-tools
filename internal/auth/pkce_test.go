@@ -211,6 +211,7 @@ func TestExchangeCodeForToken_ExpiryCalculation(t *testing.T) {
 			resp := tokenResponse{
 				AccessToken: "sha256~test",
 				ExpiresIn:   tt.expiresIn,
+				TokenType:   "Bearer",
 			}
 			body, _ := json.Marshal(resp)
 
@@ -234,4 +235,74 @@ func TestExchangeCodeForToken_ExpiryCalculation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExchangeCodeForToken_TokenTypeValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenType string
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:      "valid Bearer token type",
+			tokenType: "Bearer",
+			wantErr:   false,
+		},
+		{
+			name:      "unsupported token type",
+			tokenType: "DPoP",
+			wantErr:   true,
+			errMsg:    "unsupported token type",
+		},
+		{
+			name:      "missing token type",
+			tokenType: "",
+			wantErr:   true,
+			errMsg:    "unsupported token type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := tokenResponse{
+				AccessToken: "sha256~test",
+				ExpiresIn:   3600,
+				TokenType:   tt.tokenType,
+			}
+			body, _ := json.Marshal(resp)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write(body)
+			}))
+			defer server.Close()
+
+			mockStorage := &storage.MockStorage{}
+			logger := log.New(false)
+			auth := NewAuthenticator(server.URL, false, mockStorage, logger)
+
+			tokenData, err := auth.exchangeCodeForToken(server.URL, "code", "http://localhost/cb", "verifier")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("exchangeCodeForToken() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && !containsTokenTypeSubstring(err.Error(), tt.errMsg) {
+				t.Errorf("exchangeCodeForToken() error = %v, want substring %q", err, tt.errMsg)
+			}
+			if !tt.wantErr && tokenData == nil {
+				t.Error("tokenData should not be nil when wantErr is false")
+			}
+		})
+	}
+}
+
+// containsTokenTypeSubstring checks if a string contains a substring
+func containsTokenTypeSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

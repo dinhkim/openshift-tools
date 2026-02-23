@@ -8,7 +8,7 @@ import (
 )
 
 func TestStartCallbackServer(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -32,7 +32,7 @@ func TestStartCallbackServer(t *testing.T) {
 }
 
 func TestCallbackServer_RedirectURI(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -46,7 +46,7 @@ func TestCallbackServer_RedirectURI(t *testing.T) {
 }
 
 func TestCallbackServer_ReceivesCode(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestCallbackServer_ReceivesCode(t *testing.T) {
 
 	// Simulate the OAuth redirect by making an HTTP request to the callback
 	go func() {
-		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?code=test-auth-code-123", cs.port)
+		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?code=test-auth-code-123&state=test-state", cs.port)
 		resp, err := http.Get(callbackURL)
 		if err != nil {
 			t.Errorf("failed to make callback request: %v", err)
@@ -78,7 +78,7 @@ func TestCallbackServer_ReceivesCode(t *testing.T) {
 }
 
 func TestCallbackServer_MissingCode(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCallbackServer_MissingCode(t *testing.T) {
 
 	// Make callback without code parameter
 	go func() {
-		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback", cs.port)
+		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?state=test-state", cs.port)
 		resp, err := http.Get(callbackURL)
 		if err != nil {
 			t.Errorf("failed to make callback request: %v", err)
@@ -106,7 +106,7 @@ func TestCallbackServer_MissingCode(t *testing.T) {
 }
 
 func TestCallbackServer_OAuthError(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -114,7 +114,7 @@ func TestCallbackServer_OAuthError(t *testing.T) {
 
 	// Simulate an OAuth error response
 	go func() {
-		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?error=access_denied&error_description=user+denied+access", cs.port)
+		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?error=access_denied&error_description=user+denied+access&state=test-state", cs.port)
 		resp, err := http.Get(callbackURL)
 		if err != nil {
 			t.Errorf("failed to make callback request: %v", err)
@@ -134,7 +134,7 @@ func TestCallbackServer_OAuthError(t *testing.T) {
 }
 
 func TestCallbackServer_Timeout(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCallbackServer_Timeout(t *testing.T) {
 }
 
 func TestCallbackServer_Shutdown(t *testing.T) {
-	cs, err := startCallbackServer()
+	cs, err := startCallbackServer("test-state")
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestCallbackServer_Shutdown(t *testing.T) {
 	// Give it a moment to shut down
 	time.Sleep(100 * time.Millisecond)
 
-	callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?code=test", port)
+	callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?code=test&state=test-state", port)
 	_, err = http.Get(callbackURL)
 	if err == nil {
 		t.Error("expected connection error after shutdown, got nil")
@@ -172,13 +172,13 @@ func TestCallbackServer_Shutdown(t *testing.T) {
 
 func TestCallbackServer_MultiplePorts(t *testing.T) {
 	// Start multiple servers to ensure they get different ports
-	cs1, err := startCallbackServer()
+	cs1, err := startCallbackServer("test-state-1")
 	if err != nil {
 		t.Fatalf("startCallbackServer() 1 error = %v", err)
 	}
 	defer cs1.shutdown()
 
-	cs2, err := startCallbackServer()
+	cs2, err := startCallbackServer("test-state-2")
 	if err != nil {
 		t.Fatalf("startCallbackServer() 2 error = %v", err)
 	}

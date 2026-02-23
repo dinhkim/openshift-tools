@@ -2,9 +2,11 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/dinhkim/openshift-tools/internal/log"
 	"github.com/dinhkim/openshift-tools/internal/storage"
@@ -271,7 +273,7 @@ func TestAuthenticateWithCredentials(t *testing.T) {
 			oauthEndpointCalled := false
 			authEndpointCalled := false
 
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/.well-known/oauth-authorization-server" {
 					oauthEndpointCalled = true
 					w.WriteHeader(http.StatusOK)
@@ -310,6 +312,9 @@ func TestAuthenticateWithCredentials(t *testing.T) {
 			}
 
 			auth := NewAuthenticator(server.URL, false, mockStorage, logger)
+			// Update transport to skip TLS verification for test server
+			tlsClient := server.Client()
+			auth.httpClient.Transport = tlsClient.Transport
 
 			tokenData, err := auth.AuthenticateWithCredentials("test-cluster", tt.username, tt.password)
 
@@ -347,4 +352,137 @@ func TestAuthenticateWithCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetOAuthInfo_HTTPSValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		oauth   OAuthInfo
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid HTTPS authorization endpoint",
+			oauth: OAuthInfo{
+				AuthorizationEndpoint: "https://oauth.example.com/authorize",
+				TokenEndpoint:         "https://oauth.example.com/token",
+			},
+			wantErr: false,
+		},
+		{
+			name: "HTTP authorization endpoint rejected",
+			oauth: OAuthInfo{
+				AuthorizationEndpoint: "http://oauth.example.com/authorize",
+			},
+			wantErr: true,
+			errMsg:  "authorization endpoint validation failed: endpoint must use HTTPS",
+		},
+		{
+			name: "HTTP token endpoint rejected",
+			oauth: OAuthInfo{
+				AuthorizationEndpoint: "https://oauth.example.com/authorize",
+				TokenEndpoint:         "http://oauth.example.com/token",
+			},
+			wantErr: true,
+			errMsg:  "token endpoint validation failed: endpoint must use HTTPS",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/.well-known/oauth-authorization-server" {
+					body, _ := json.Marshal(tt.oauth)
+					w.WriteHeader(http.StatusOK)
+					w.Write(body)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer server.Close()
+
+			mockStorage := storage.NewMockStorage()
+			logger := log.New(false)
+			auth := NewAuthenticator(server.URL, false, mockStorage, logger)
+			auth.httpClient.Transport = server.Client().Transport
+
+			_, err := auth.GetOAuthInfo()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetOAuthInfo() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !containsSubstringSimple(err.Error(), tt.errMsg) {
+				t.Errorf("GetOAuthInfo() error = %v, want substring %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestCallbackServer_StateValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		callURL  string
+		wantErr  bool
+		wantCode string
+		errMsg   string
+	}{
+		{
+			name:     "valid state parameter",
+			state:    "test-state-123",
+			callURL:  "http://127.0.0.1:%d/callback?code=auth-code&state=test-state-123",
+			wantErr:  false,
+			wantCode: "auth-code",
+		},
+		{
+			name:    "missing state parameter",
+			state:   "test-state-123",
+			callURL: "http://127.0.0.1:%d/callback?code=auth-code",
+			wantErr: true,
+			errMsg:  "state parameter missing",
+		},
+		{
+			name:    "state mismatch - CSRF attack",
+			state:   "test-state-123",
+			callURL: "http://127.0.0.1:%d/callback?code=auth-code&state=wrong-state",
+			wantErr: true,
+			errMsg:  "state parameter mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, err := startCallbackServer(tt.state)
+			if err != nil {
+				t.Fatalf("startCallbackServer() error = %v", err)
+			}
+			defer cs.shutdown()
+
+			go func() {
+				callbackURL := fmt.Sprintf(tt.callURL, cs.port)
+				http.Get(callbackURL)
+			}()
+
+			code, err := cs.waitForCallback(5 * time.Second)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("waitForCallback() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && !containsSubstringSimple(err.Error(), tt.errMsg) {
+				t.Errorf("waitForCallback() error = %v, want substring %q", err, tt.errMsg)
+			}
+			if !tt.wantErr && code != tt.wantCode {
+				t.Errorf("code = %q, want %q", code, tt.wantCode)
+			}
+		})
+	}
+}
+
+// containsSubstringSimple checks if a string contains a substring (case-sensitive)
+func containsSubstringSimple(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

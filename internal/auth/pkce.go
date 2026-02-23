@@ -67,9 +67,10 @@ func (a *Authenticator) exchangeCodeForToken(tokenEndpoint, code, redirectURI, c
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// Use a separate client that follows redirects for the token exchange
+	// Use a separate client with timeout for the token exchange
 	tokenClient := &http.Client{
 		Transport: a.httpClient.Transport,
+		Timeout:   30 * time.Second,
 	}
 
 	resp, err := tokenClient.Do(req)
@@ -95,6 +96,11 @@ func (a *Authenticator) exchangeCodeForToken(tokenEndpoint, code, redirectURI, c
 
 	if tokenResp.AccessToken == "" {
 		return nil, fmt.Errorf("token response did not contain an access token")
+	}
+
+	// Validate token_type is Bearer
+	if tokenResp.TokenType != "Bearer" {
+		return nil, fmt.Errorf("unsupported token type: %s (expected Bearer)", tokenResp.TokenType)
 	}
 
 	// Calculate expiry timestamp
