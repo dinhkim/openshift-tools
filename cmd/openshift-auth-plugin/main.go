@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	
+
 	"github.com/dinhkim/openshift-tools/internal/auth"
 	"github.com/dinhkim/openshift-tools/internal/config"
 	"github.com/dinhkim/openshift-tools/internal/credential"
@@ -67,12 +67,25 @@ func run(cfg *config.Config, store storage.Storage, authenticator *auth.Authenti
 		logger.Debug("No cached token found")
 	}
 
-	// Method 2: Authenticate with username/password
+	// Method 2: SSO/PKCE authentication via browser
+	logger.Debug("Attempting SSO authentication...")
+
+	ssoTokenData, ssoErr := authenticator.AuthenticateWithSSO(cfg.ClusterName, cfg.SSOTimeout)
+	if ssoErr == nil {
+		logger.Debug("SSO authentication successful")
+		if err := credential.OutputToken(ssoTokenData.Token, ssoTokenData.ExpirationTimestamp); err != nil {
+			return fmt.Errorf("failed to output token: %w", err)
+		}
+		return nil
+	}
+	logger.Debug("SSO authentication failed: %v", ssoErr)
+
+	// Method 3: Authenticate with username/password
 	logger.Debug("Attempting to authenticate with stored credentials...")
 
 	credStr, err := store.Get(cfg.ClusterName, "credentials")
 	if err != nil || credStr == "" {
-		return fmt.Errorf("no valid authentication method found. Please store credentials in %s. See README.md for more information", cfg.SecretStore)
+		return fmt.Errorf("no valid authentication method found. SSO failed: %v. No stored credentials found in %s. See README.md for more information", ssoErr, cfg.SecretStore)
 	}
 
 	var creds auth.CredentialsData

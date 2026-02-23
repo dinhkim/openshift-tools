@@ -32,6 +32,7 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    true,
 				SecretStore:  "gopass",
 				Debug:        true,
+				SSOTimeout:   120,
 			},
 		},
 		{
@@ -51,6 +52,7 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    false,
 				SecretStore:  "keychain",
 				Debug:        false,
+				SSOTimeout:   120,
 			},
 		},
 		{
@@ -67,6 +69,7 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    false,
 				SecretStore:  "keychain",
 				Debug:        false,
+				SSOTimeout:   120,
 			},
 		},
 		{
@@ -112,6 +115,7 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    false,
 				SecretStore:  "keychain",
 				Debug:        false,
+				SSOTimeout:   120,
 			},
 		},
 		{
@@ -129,6 +133,7 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    false,
 				SecretStore:  "keychain",
 				Debug:        false,
+				SSOTimeout:   120,
 			},
 		},
 		{
@@ -147,6 +152,44 @@ func TestLoad(t *testing.T) {
 				VerifySSL:    true,
 				SecretStore:  "keychain",
 				Debug:        true,
+				SSOTimeout:   120,
+			},
+		},
+		{
+			name: "custom SSO timeout via env var",
+			envVars: map[string]string{
+				"CLUSTER_NAME":  "test-cluster",
+				"OPENSHIFT_URL": "https://api.test.com:6443",
+				"SSO_TIMEOUT":   "180",
+			},
+			args:    []string{},
+			wantErr: false,
+			wantConfig: &Config{
+				ClusterName:  "test-cluster",
+				OpenShiftURL: "https://api.test.com:6443",
+				VerifySSL:    false,
+				SecretStore:  "keychain",
+				Debug:        false,
+				SSOTimeout:   180,
+			},
+		},
+		{
+			name: "SSO timeout via flag",
+			envVars: map[string]string{
+				"CLUSTER_NAME":  "test-cluster",
+				"OPENSHIFT_URL": "https://api.test.com:6443",
+			},
+			args: []string{
+				"-sso-timeout=60",
+			},
+			wantErr: false,
+			wantConfig: &Config{
+				ClusterName:  "test-cluster",
+				OpenShiftURL: "https://api.test.com:6443",
+				VerifySSL:    false,
+				SecretStore:  "keychain",
+				Debug:        false,
+				SSOTimeout:   60,
 			},
 		},
 	}
@@ -199,6 +242,9 @@ func TestLoad(t *testing.T) {
 			}
 			if got.Debug != tt.wantConfig.Debug {
 				t.Errorf("Debug = %v, want %v", got.Debug, tt.wantConfig.Debug)
+			}
+			if got.SSOTimeout != tt.wantConfig.SSOTimeout {
+				t.Errorf("SSOTimeout = %d, want %d", got.SSOTimeout, tt.wantConfig.SSOTimeout)
 			}
 		})
 	}
@@ -305,6 +351,59 @@ func TestGetEnvBool(t *testing.T) {
 			got := getEnvBool(tt.key, tt.defaultValue)
 			if got != tt.want {
 				t.Errorf("getEnvBool() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	tests := []struct {
+		name         string
+		key          string
+		defaultValue int
+		envValue     string
+		want         int
+	}{
+		{
+			name:         "valid integer",
+			key:          "TEST_INT",
+			defaultValue: 100,
+			envValue:     "200",
+			want:         200,
+		},
+		{
+			name:         "empty uses default",
+			key:          "TEST_INT",
+			defaultValue: 120,
+			envValue:     "",
+			want:         120,
+		},
+		{
+			name:         "invalid integer uses default",
+			key:          "TEST_INT",
+			defaultValue: 120,
+			envValue:     "not-a-number",
+			want:         120,
+		},
+		{
+			name:         "zero value",
+			key:          "TEST_INT",
+			defaultValue: 120,
+			envValue:     "0",
+			want:         0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Clearenv()
+			if tt.envValue != "" {
+				os.Setenv(tt.key, tt.envValue)
+			}
+
+			got := getEnvInt(tt.key, tt.defaultValue)
+			if got != tt.want {
+				t.Errorf("getEnvInt() = %d, want %d", got, tt.want)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"time"
@@ -16,9 +18,23 @@ import (
 	"github.com/dinhkim/openshift-tools/internal/storage"
 )
 
+// validateHTTPS ensures the given URL uses HTTPS scheme
+func validateHTTPS(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("endpoint must use HTTPS, got %s", u.Scheme)
+	}
+	return nil
+}
+
 // OAuthInfo represents the OAuth authorization server metadata
 type OAuthInfo struct {
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
+	TokenEndpoint                 string   `json:"token_endpoint"`
+	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
 }
 
 // TokenData represents stored token information
@@ -89,6 +105,18 @@ func (a *Authenticator) GetOAuthInfo() (*OAuthInfo, error) {
 
 	if info.AuthorizationEndpoint == "" {
 		return nil, fmt.Errorf("authorization endpoint not found in OAuth info")
+	}
+
+	// Validate HTTPS for authorization endpoint
+	if err := validateHTTPS(info.AuthorizationEndpoint); err != nil {
+		return nil, fmt.Errorf("authorization endpoint validation failed: %w", err)
+	}
+
+	// Validate HTTPS for token endpoint if present
+	if info.TokenEndpoint != "" {
+		if err := validateHTTPS(info.TokenEndpoint); err != nil {
+			return nil, fmt.Errorf("token endpoint validation failed: %w", err)
+		}
 	}
 
 	return &info, nil
@@ -182,6 +210,106 @@ func (a *Authenticator) AuthenticateWithCredentials(clusterName, username, passw
 	return tokenData, nil
 }
 
+// AuthenticateWithSSO performs OAuth authentication using the PKCE flow
+// (Authorization Code + Proof Key for Code Exchange) with openshift-cli-client.
+// This opens a browser for the user to authenticate via SSO (Azure AD, Okta, etc.)
+func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds int) (*TokenData, error) {
+	a.logger.Debug("Starting SSO authentication for cluster %s", clusterName)
+
+	// Get OAuth information
+	oauthInfo, err := a.GetOAuthInfo()
+	if err != nil {
+		return nil, fmt.Errorf("SSO authentication failed: %w", err)
+	}
+
+	if oauthInfo.TokenEndpoint == "" {
+		return nil, fmt.Errorf("SSO authentication not available: token endpoint not found in OAuth metadata")
+	}
+
+	a.logger.Debug("Authorization endpoint: %s", oauthInfo.AuthorizationEndpoint)
+	a.logger.Debug("Token endpoint: %s", oauthInfo.TokenEndpoint)
+
+	// Generate PKCE parameters
+	pkce, err := generatePKCE()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PKCE parameters: %w", err)
+	}
+	a.logger.Debug("Generated PKCE code challenge")
+
+	// Generate state parameter for CSRF protection
+	state, err := generateRandomState()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate state parameter: %w", err)
+	}
+	a.logger.Debug("Generated state parameter")
+
+	// Start local callback server with state validation
+	callbackSrv, err := startCallbackServer(state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start callback server: %w", err)
+	}
+	defer callbackSrv.shutdown()
+
+	a.logger.Debug("Callback server listening on %s", callbackSrv.redirectURI())
+
+	// Build authorization URL
+	authURL, err := url.Parse(oauthInfo.AuthorizationEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid authorization endpoint URL: %w", err)
+	}
+
+	query := authURL.Query()
+	query.Set("client_id", "openshift-cli-client")
+	query.Set("response_type", "code")
+	query.Set("redirect_uri", callbackSrv.redirectURI())
+	query.Set("code_challenge", pkce.CodeChallenge)
+	query.Set("code_challenge_method", "S256")
+	query.Set("state", state)
+	authURL.RawQuery = query.Encode()
+
+	authURLStr := authURL.String()
+
+	// Open browser for authentication
+	a.logger.Debug("Opening browser for SSO authentication...")
+	if err := openBrowser(authURLStr); err != nil {
+		a.logger.Debug("Failed to open browser: %v", err)
+		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\nOpen this URL in your browser to authenticate:\n\n%s\n\n", authURLStr)
+	} else {
+		fmt.Fprintf(os.Stderr, "Opening browser for SSO authentication...\nIf the browser does not open, visit:\n\n%s\n\n", authURLStr)
+	}
+
+	timeout := time.Duration(timeoutSeconds) * time.Second
+	fmt.Fprintf(os.Stderr, "Waiting for authentication (timeout: %v)...\n", timeout)
+
+	// Wait for the authorization code
+	code, err := callbackSrv.waitForCallback(timeout)
+	if err != nil {
+		return nil, fmt.Errorf("SSO authentication failed: %w", err)
+	}
+
+	a.logger.Debug("Received authorization code, exchanging for token...")
+
+	// Exchange authorization code for access token
+	tokenData, err := a.exchangeCodeForToken(oauthInfo.TokenEndpoint, code, callbackSrv.redirectURI(), pkce.CodeVerifier)
+	if err != nil {
+		return nil, fmt.Errorf("SSO token exchange failed: %w", err)
+	}
+
+	// Store token in secret store
+	tokenJSON, err := json.Marshal(tokenData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal token data: %w", err)
+	}
+
+	if err := a.storage.Store(clusterName, "token", string(tokenJSON)); err != nil {
+		a.logger.Debug("Warning: failed to store token: %v", err)
+	}
+
+	a.logger.Debug("SSO authentication successful, token expires at %s", tokenData.ExpirationTimestamp)
+
+	return tokenData, nil
+}
+
 // extractTokenFromFragment extracts access_token and expires_in from the OAuth redirect fragment
 func extractTokenFromFragment(locationHeader string) (accessToken string, expiresIn int, err error) {
 	// The token is in the URL fragment after #
@@ -203,4 +331,13 @@ func extractTokenFromFragment(locationHeader string) (accessToken string, expire
 	}
 
 	return accessToken, expiresIn, nil
+}
+
+// generateRandomState generates a random state parameter for CSRF protection
+func generateRandomState() (string, error) {
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random state: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(stateBytes), nil
 }

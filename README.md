@@ -37,6 +37,7 @@ The plugin can be configured via environment variables or command-line flags (fl
 | `VERIFY_SSL` / `--verify-ssl` | Verify SSL certificates | `false` |
 | `SECRET_STORE` / `--secret-store` | Secret store backend: `keychain` or `gopass` | `keychain` |
 | `DEBUG` / `--debug` | Enable debug logging to stderr | `false` |
+| `SSO_TIMEOUT` / `--sso-timeout` | Seconds to wait for SSO browser authentication | `120` |
 
 #### kubeconfig Setup
 
@@ -149,12 +150,32 @@ Replace `/path/to/openshift-auth-plugin.sh` with the actual path to the script, 
 
 ## How it Works
 
-Both implementations use the same authentication flow:
+### Go Version (3-method authentication)
 
-1. **Token Authentication**: If a valid, unexpired token is found in the configured secret store (Keychain or `gopass`), it will be used for authentication.
-2. **Username/Password Authentication**: If a token is not available or has expired, the plugin will authenticate using stored username and password credentials.
+The Go plugin tries three authentication methods in order:
 
-Upon successful authentication, the plugin outputs a valid ExecCredential JSON to kubectl with the token and expiration timestamp.
+1. **Cached Token**: If a valid, unexpired token is found in the configured secret store (Keychain or `gopass`), it will be used immediately.
+2. **SSO/PKCE Authentication**: Opens your default browser for SSO login (Azure AD, Okta, etc.) using the OAuth 2.0 Authorization Code + PKCE flow with `client_id=openshift-cli-client`. A local callback server receives the authorization code and exchanges it for an access token.
+3. **Username/Password Fallback**: If SSO fails (e.g., no browser available, or cluster does not support SSO), the plugin falls back to authenticating with stored username and password credentials via HTTP Basic Auth.
+
+### Shell Script (2-method authentication)
+
+1. **Cached Token**: Same as Go version.
+2. **Username/Password**: Falls back to stored credentials via HTTP Basic Auth.
+
+Upon successful authentication, both versions output a valid ExecCredential JSON to kubectl with the token and expiration timestamp.
+
+### SSO Authentication Details
+
+When SSO authentication is triggered, the plugin will:
+
+1. Open your default browser to the OpenShift OAuth login page
+2. Start a temporary local server on `127.0.0.1` (random port) to receive the callback
+3. Wait for you to complete authentication in the browser (default timeout: 120 seconds)
+4. Exchange the authorization code for an access token using PKCE
+5. Cache the token for future use
+
+If the browser cannot be opened automatically, the plugin prints the URL to stderr so you can copy it manually.
 
 ---
 
@@ -223,8 +244,14 @@ Debug output goes to stderr and includes:
 - Set the `CLUSTER_NAME` environment variable or `--cluster-name` flag
 
 **"No valid authentication method found"**
-- Credentials are not stored in the secret store
-- Follow the "Storing Credentials" section to save your username/password
+- SSO authentication did not complete (browser was not opened, or timed out)
+- No stored username/password credentials found
+- Follow the "Storing Credentials" section to save your username/password as a fallback
+
+**"SSO authentication timed out"**
+- Increase the timeout with `SSO_TIMEOUT=180` or `--sso-timeout=180`
+- Check that the browser opened the correct URL
+- Copy the URL printed to stderr and open it manually
 
 **"Failed to connect to OAuth endpoint"**
 - Check `OPENSHIFT_URL` is correct
@@ -249,7 +276,9 @@ openshift-tools/
 │   └── main.go
 ├── internal/                      # Internal packages
 │   ├── auth/                      # Authentication logic
-│   │   ├── oauth.go              # OAuth flow
+│   │   ├── oauth.go              # OAuth flows (Basic Auth + SSO)
+│   │   ├── pkce.go               # PKCE generation + token exchange
+│   │   ├── callback.go           # Local callback server + browser
 │   │   └── token.go              # Token validation
 │   ├── config/                    # Configuration
 │   │   └── config.go
