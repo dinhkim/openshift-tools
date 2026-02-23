@@ -266,6 +266,18 @@ Debug output goes to stderr and includes:
 - For development/test clusters with self-signed certs, use `VERIFY_SSL=false` or `--verify-ssl=false`
 - For production, ensure your system trusts the cluster's CA certificate
 
+**macOS: "Apple could not verify this app is free of malware"**
+
+This warning appears because the binary is not signed with an Apple Developer certificate.
+To bypass it, remove the quarantine attribute after downloading:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/openshift-auth-plugin
+```
+
+Alternatively, right-click (or Control-click) the binary in Finder and select **Open**,
+then click **Open** in the dialog. This only needs to be done once.
+
 ## Development
 
 ### Project Structure
