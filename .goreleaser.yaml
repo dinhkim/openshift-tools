@@ -28,4 +28,6 @@ release:
   github:
     owner: dinhkim
     name: openshift-tools
-  auto_generate_notes: true
+
+changelog:
+  use: github
