@@ -33,6 +33,7 @@ func TestLoad(t *testing.T) {
 				SecretStore:  "gopass",
 				Debug:        true,
 				SSOTimeout:   120,
+				IDPHint:      "",
 			},
 		},
 		{
@@ -190,6 +191,65 @@ func TestLoad(t *testing.T) {
 				SecretStore:  "keychain",
 				Debug:        false,
 				SSOTimeout:   60,
+				IDPHint:      "",
+			},
+		},
+		{
+			name: "IDP hint via env var",
+			envVars: map[string]string{
+				"CLUSTER_NAME":  "test-cluster",
+				"OPENSHIFT_URL": "https://api.test.com:6443",
+				"IDP":           "AzureAD",
+			},
+			args:    []string{},
+			wantErr: false,
+			wantConfig: &Config{
+				ClusterName:  "test-cluster",
+				OpenShiftURL: "https://api.test.com:6443",
+				VerifySSL:    false,
+				SecretStore:  "keychain",
+				Debug:        false,
+				SSOTimeout:   120,
+				IDPHint:      "AzureAD",
+			},
+		},
+		{
+			name: "IDP hint via flag overrides env var",
+			envVars: map[string]string{
+				"CLUSTER_NAME":  "test-cluster",
+				"OPENSHIFT_URL": "https://api.test.com:6443",
+				"IDP":           "AzureAD",
+			},
+			args: []string{
+				"-idp=Okta",
+			},
+			wantErr: false,
+			wantConfig: &Config{
+				ClusterName:  "test-cluster",
+				OpenShiftURL: "https://api.test.com:6443",
+				VerifySSL:    false,
+				SecretStore:  "keychain",
+				Debug:        false,
+				SSOTimeout:   120,
+				IDPHint:      "Okta",
+			},
+		},
+		{
+			name: "IDP hint empty by default",
+			envVars: map[string]string{
+				"CLUSTER_NAME":  "test-cluster",
+				"OPENSHIFT_URL": "https://api.test.com:6443",
+			},
+			args:    []string{},
+			wantErr: false,
+			wantConfig: &Config{
+				ClusterName:  "test-cluster",
+				OpenShiftURL: "https://api.test.com:6443",
+				VerifySSL:    false,
+				SecretStore:  "keychain",
+				Debug:        false,
+				SSOTimeout:   120,
+				IDPHint:      "",
 			},
 		},
 	}
@@ -245,6 +305,9 @@ func TestLoad(t *testing.T) {
 			}
 			if got.SSOTimeout != tt.wantConfig.SSOTimeout {
 				t.Errorf("SSOTimeout = %d, want %d", got.SSOTimeout, tt.wantConfig.SSOTimeout)
+			}
+			if got.IDPHint != tt.wantConfig.IDPHint {
+				t.Errorf("IDPHint = %q, want %q", got.IDPHint, tt.wantConfig.IDPHint)
 			}
 		})
 	}

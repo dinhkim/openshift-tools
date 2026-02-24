@@ -212,8 +212,10 @@ func (a *Authenticator) AuthenticateWithCredentials(clusterName, username, passw
 
 // AuthenticateWithSSO performs OAuth authentication using the PKCE flow
 // (Authorization Code + Proof Key for Code Exchange) with openshift-cli-client.
-// This opens a browser for the user to authenticate via SSO (Azure AD, Okta, etc.)
-func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds int) (*TokenData, error) {
+// This opens a browser for the user to authenticate via SSO (Azure AD, Okta, etc.).
+// idpHint is an optional identity provider identifier; when non-empty it is included
+// as the "idp" query parameter in the authorization URL.
+func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds int, idpHint string) (*TokenData, error) {
 	a.logger.Debug("Starting SSO authentication for cluster %s", clusterName)
 
 	// Get OAuth information
@@ -265,6 +267,9 @@ func (a *Authenticator) AuthenticateWithSSO(clusterName string, timeoutSeconds i
 	query.Set("code_challenge", pkce.CodeChallenge)
 	query.Set("code_challenge_method", "S256")
 	query.Set("state", state)
+	if idpHint != "" {
+		query.Set("idp", idpHint)
+	}
 	authURL.RawQuery = query.Encode()
 
 	authURLStr := authURL.String()

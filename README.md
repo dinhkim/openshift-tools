@@ -38,6 +38,7 @@ The plugin can be configured via environment variables or command-line flags (fl
 | `SECRET_STORE` / `--secret-store` | Secret store backend: `keychain` or `gopass` | `keychain` |
 | `DEBUG` / `--debug` | Enable debug logging to stderr | `false` |
 | `SSO_TIMEOUT` / `--sso-timeout` | Seconds to wait for SSO browser authentication | `120` |
+| `IDP` / `--idp` | Identity provider hint passed as `idp` query param in the SSO authorization URL (omitted when empty) | |
 
 #### kubeconfig Setup
 
@@ -214,6 +215,7 @@ The Go version is **100% backward compatible** with the shell version. To migrat
    args:
      - --cluster-name=my-cluster
      - --debug
+     - --idp=AzureAD   # optional: specify your identity provider
    provideClusterInfo: true
    ```
 
@@ -252,6 +254,11 @@ Debug output goes to stderr and includes:
 - Increase the timeout with `SSO_TIMEOUT=180` or `--sso-timeout=180`
 - Check that the browser opened the correct URL
 - Copy the URL printed to stderr and open it manually
+
+**SSO redirects to the wrong identity provider**
+- Set `IDP=<provider>` or `--idp=<provider>` to pass an IdP hint in the authorization URL
+- Example: `IDP=AzureAD` or `--idp=Okta`
+- When not set, no `idp` parameter is sent and the cluster's default IdP is used
 
 **"Failed to connect to OAuth endpoint"**
 - Check `OPENSHIFT_URL` is correct

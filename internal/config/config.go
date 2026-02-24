@@ -15,7 +15,8 @@ type Config struct {
 	VerifySSL    bool
 	SecretStore  string
 	Debug        bool
-	SSOTimeout   int // seconds to wait for SSO callback
+	SSOTimeout   int    // seconds to wait for SSO callback
+	IDPHint      string // optional IdP identifier to pass in the SSO authorization URL
 }
 
 // KubernetesExecInfo represents the cluster info passed via KUBERNETES_EXEC_INFO env var
@@ -39,6 +40,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.SecretStore, "secret-store", getEnvDefault("SECRET_STORE", "keychain"), "Secret store backend: keychain or gopass")
 	flag.BoolVar(&cfg.Debug, "debug", getEnvBool("DEBUG", false), "Enable debug logging")
 	flag.IntVar(&cfg.SSOTimeout, "sso-timeout", getEnvInt("SSO_TIMEOUT", 120), "Seconds to wait for SSO authentication (default: 120)")
+	flag.StringVar(&cfg.IDPHint, "idp", getEnvDefault("IDP", ""), "Identity provider hint to pass in the SSO authorization URL (optional)")
 
 	flag.Parse()
 

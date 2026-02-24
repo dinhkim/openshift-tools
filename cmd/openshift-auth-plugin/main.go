@@ -82,7 +82,7 @@ func run(cfg *config.Config, store storage.Storage, authenticator *auth.Authenti
 	// Method 2: SSO/PKCE authentication via browser
 	logger.Debug("Attempting SSO authentication...")
 
-	ssoTokenData, ssoErr := authenticator.AuthenticateWithSSO(cfg.ClusterName, cfg.SSOTimeout)
+	ssoTokenData, ssoErr := authenticator.AuthenticateWithSSO(cfg.ClusterName, cfg.SSOTimeout, cfg.IDPHint)
 	if ssoErr == nil {
 		logger.Debug("SSO authentication successful")
 		if err := credential.OutputToken(ssoTokenData.Token, ssoTokenData.ExpirationTimestamp); err != nil {

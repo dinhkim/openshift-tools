@@ -189,6 +189,7 @@ Note: Real storage backends (keychain, gopass) are not unit tested as they requi
 | `SECRET_STORE` | No | `keychain` | `keychain` or `gopass` |
 | `DEBUG` | No | `false` | Debug logging to stderr |
 | `SSO_TIMEOUT` | No | `120` | Seconds to wait for SSO browser authentication |
+| `IDP` | No | `""` | Identity provider hint passed as `idp` query param in the SSO authorization URL (omitted when empty) |
 
 ## Commit Message Style
 - Prefix with type: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
